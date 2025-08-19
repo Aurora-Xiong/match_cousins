@@ -2,8 +2,8 @@
 from pathlib import Path
 import argparse
 import objaverse
-import os
 import json
+from tqdm import tqdm
 
 def find_assets(
     keyword: str,
@@ -49,7 +49,7 @@ def download_from_objaverse(keyword: str, output_dir: str, max_count: int) -> No
     local_paths = objaverse.load_objects(uids, 8)
 
     objaverse_download_file = f"{output_dir}/objaverse_download.jsonl"
-    for uid, tmp_path in local_paths.items():
+    for uid, tmp_path in tqdm(local_paths.items(), total=len(local_paths), desc="Processing downloads"):
         path = Path(tmp_path)
         if path.suffix == ".tmp":
             finished = path.with_suffix("")
@@ -66,9 +66,9 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser(
       description="Download assets from Objaverse based on a keyword search."
   )
-  parser.add_argument("--keyword", type=str, default="cup", help="Keyword to search for")
-  parser.add_argument("--output_dir", type=str, default="cup", help="Directory to save downloaded assets")
-  parser.add_argument("--max_count", type=int, default=50, help="Maximum number of assets to download")
+  parser.add_argument("-q", type=str, default="cup", help="Keyword to search for")
+  parser.add_argument("--out", type=str, default="cup", help="Directory to save downloaded assets")
+  parser.add_argument("-n", type=int, default=50, help="Maximum number of assets to download")
   args = parser.parse_args()
 
-  download_from_objaverse(args.keyword, args.output_dir, args.max_count)
+  download_from_objaverse(args.q, args.out, args.n)

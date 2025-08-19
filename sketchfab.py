@@ -119,29 +119,30 @@ def search_models(q: str, access_token: str, limit: int) -> List[Dict]:
     The v3 search endpoint supports filtering; we request downloadable models.
     """
     results: List[Dict] = []
-    page = 1
-    page_size = 24  # Sketchfab paginates; typical size is 24
+    page, page_size = 1, 60
+
     while len(results) < limit:
         params = {
             "type": "models",
             "q": q,
-            "downloadable": "true",  # filter for downloadable models
-            "sort_by": "relevance",  # "relevance", "likeCount", etc.
+            "downloadable": "true",
+            "sort_by": "relevance",
             "page": page,
             "per_page": page_size,
         }
+
         data = api_get("/search", access_token, params)
-        items = data.get("results", [])
-        if not items:
+        items = data.get("results", []) 
+        if not items: 
             break
-        # Keep only items that are actually downloadable and free (non-store)
         for it in items:
             if it.get("isDownloadable") and not it.get("isStoreModel", False):
                 results.append(it)
                 if len(results) >= limit:
                     break
         page += 1
-    return results[:limit]
+
+    return results
 
 def choose_archive(download_info: Dict) -> Tuple[str, str]:
     """
@@ -219,8 +220,12 @@ def download_by_query(query: str, n: int, out_dir: str, tokens: Dict):
         return
 
     download_cnt = 0
+    seen_uid = set()
     for idx, item in enumerate(found, 1):
         uid = item["uid"]
+        if uid in seen_uid:
+            continue
+        seen_uid.add(uid)
         title = item.get("name") or f"model_{uid}"
         user = item.get("user", {})
         author = user.get("displayName") or user.get("username") or "unknown"
@@ -235,10 +240,14 @@ def download_by_query(query: str, n: int, out_dir: str, tokens: Dict):
         except requests.HTTPError as e:
             # Token might have expired; try refresh once
             if e.response is not None and e.response.status_code == 401 and refresh_token:
-                print("Access token expired. Refreshing...")
-                tokens_new = refresh_access_token(refresh_token)
-                access_token = tokens_new["access_token"]
-                info = request_download_url(uid, access_token)
+                try:
+                    print("Access token expired. Refreshing...")
+                    tokens_new = refresh_access_token(refresh_token)
+                    access_token = tokens_new["access_token"]
+                    info = request_download_url(uid, access_token)
+                except requests.HTTPError as e:
+                    print(f"Failed to refresh access token: {e}")
+                    continue
             else:
                 print(f"Failed to get download info for {title} ({uid}): {e}")
                 continue
@@ -250,15 +259,17 @@ def download_by_query(query: str, n: int, out_dir: str, tokens: Dict):
         out_path = os.path.join(out_dir, f"{safe_title}_{uid}{ext}")
         if stream_download(url, out_path):
             download_cnt += 1
+            write_credit_row(
+                credits_csv,
+                [uid, title, author, author_profile, license_label, model_url, os.path.basename(out_path)]
+            )
         else:
             print(f"Failed to download {title} ({uid}) to {out_path}")
             continue
-        write_credit_row(
-            credits_csv,
-            [uid, title, author, author_profile, license_label, model_url, os.path.basename(out_path)]
-        )
         if download_cnt >= n:
             break
+
+    print(f"Downloaded {download_cnt} models.")
 
 def download_from_sketchfab(query: str, n: int = 10, out_dir: str = "./downloads"):
     tokens = get_access_token_interactive(scope="read write")
@@ -268,8 +279,8 @@ def download_from_sketchfab(query: str, n: int = 10, out_dir: str = "./downloads
 
 def main():
     parser = argparse.ArgumentParser(description="Download free Sketchfab models by keyword.")
-    parser.add_argument("--q", required=True, help="Keyword/category (e.g., 'mug', 'chair', 'cat')")
-    parser.add_argument("--n", type=int, default=10, help="How many models to download")
+    parser.add_argument("-q", required=True, help="Keyword/category (e.g., 'mug', 'chair', 'cat')")
+    parser.add_argument("-n", type=int, default=10, help="How many models to download")
     parser.add_argument("--out", default="./downloads", help="Output directory")
     args = parser.parse_args()
 

@@ -51,8 +51,8 @@ def download_from_meshai(keyword: str, output_dir: str, max_count: int) -> None:
       preview_model_response = requests.get(preview_model_url)
       preview_model_response.raise_for_status()
 
-      with open(f"{output_dir}/meshyai_preview_model_{i}.glb", "wb") as f:
-        f.write(preview_model_response.content)
+      # with open(f"{output_dir}/meshyai_preview_model_{i}.glb", "wb") as f:
+      #   f.write(preview_model_response.content)
 
       # 4. Generate a refined model and get the task ID
       generate_refined_request = {
@@ -93,9 +93,9 @@ def download_from_meshai(keyword: str, output_dir: str, max_count: int) -> None:
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Download 3D models from MeshyAI based on a keyword.")
-  parser.add_argument("--keyword", type=str, default="cup", help="Keyword to search for")
-  parser.add_argument("--output_dir", type=str, default="cup", help="Directory to save downloaded models")
-  parser.add_argument("--max_count", type=int, default=10, help="Maximum number of models to download")
+  parser.add_argument("-q", type=str, default="cup", help="Keyword to search for")
+  parser.add_argument("--out", type=str, default="cup", help="Directory to save downloaded models")
+  parser.add_argument("-n", type=int, default=10, help="Maximum number of models to download")
   args = parser.parse_args()
 
-  download_from_meshai(args.keyword, args.output_dir, args.max_count)
+  download_from_meshai(args.q, args.out, args.n)
