@@ -4,6 +4,7 @@ import argparse
 import objaverse
 import json
 from tqdm import tqdm
+import os
 
 def find_assets(
     keyword: str,
@@ -40,6 +41,8 @@ def find_assets(
     return hits
 
 def download_from_objaverse(keyword: str, output_dir: str, max_count: int) -> None: 
+
+    os.makedirs(output_dir, exist_ok=True)
 
     assets = find_assets(keyword, 
                          limit=max_count,
