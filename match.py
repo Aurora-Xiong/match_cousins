@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-"""
-Rank all images in a directory by feature similarity to a query image,
-"""
 import argparse
 from pathlib import Path
 import faiss
@@ -13,6 +10,9 @@ import torch
 from models.dino_v2 import DinoV2Encoder
 from models.clip import CLIPEncoder
 from mathutils import Vector
+from tqdm import tqdm
+import math
+import json
 
 def render_blender(glb_path, out_dir, size=512):
     """
@@ -102,7 +102,6 @@ def render_blender(glb_path, out_dir, size=512):
         bpy.ops.render.render(write_still=True)
 
 def load_rgb_image(fpath: Path) -> np.ndarray:
-    """Load an image as a uint8 H×W×3 array."""
     img = Image.open(fpath).convert("RGB")
     return np.array(img, dtype=np.uint8)
 
@@ -140,89 +139,136 @@ def compute_global_descriptor(
 
     return np.ascontiguousarray(desc, dtype=np.float32)
 
-def main():
-    p = argparse.ArgumentParser(description="Rank images by DINOv2 feature similarity (digital-cousins)")
-    p.add_argument("-q", "--query", type=Path, help="Path to the query object image")
-    p.add_argument("-c", "--candidates", type=Path, help="Directory containing candidate images")
-    p.add_argument("--feature_type", default="concat", choices=["dino_v2", "clip", "concat"], help="Feature type to use for encoding images")
-    p.add_argument("--dinov2_backbone_size", default="base", choices=DinoV2Encoder.BACKBONE_ARCHES.keys(), help="One of small/base/large/giant")
-    p.add_argument("--clip_backbone_name", default="ViT-B/16", choices=CLIPEncoder.EMBEDDING_DIMS.keys(), help="One of ViT-B/16, ViT-B/32, ViT-L/14, etc.")
-    p.add_argument("--device", default=None, help="torch device (e.g. 'cpu' or 'cuda'); defaults to cuda if available")
-    args = p.parse_args()
+def rank_cousins(
+    asset_dir: str,
+    query_img_paths: str | list[str],
+    feature_type: str = "concat",
+    dinov2_backbone_size: str = "base",
+    clip_backbone_name: str = "ViT-B/16"
+):
+    assert feature_type in ["dino_v2", "clip", "concat"], f"Invalid feature type: {feature_type}"
 
+    # 1.render images of cousins
+    files = os.listdir(asset_dir)
+    image_dir = f"{asset_dir}_images"
+    os.makedirs(image_dir, exist_ok=True)
+    for file in tqdm(files, total=len(files), desc="Rendering candidates"):
+        if file.endswith(".glb"):
+            glb_path = os.path.join(asset_dir, file)
+            render_blender(glb_path, f"{image_dir}/{file.replace('.glb', '')}", size=512)
+
+    objaverse_data = {}
+    with open(f"{asset_dir}/objaverse_download.jsonl", "r") as f:
+        for line in f:
+            data = json.loads(line)
+            objaverse_data[data["uid"]] = data["path"]
+    
+    for uid in objaverse_data.keys():
+        glb_path = objaverse_data[uid]
+        render_blender(glb_path, f"{image_dir}/{uid}", size=512)
+
+    # 2.rank images
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # 1) Initialize the encoder
-    print(f"[INFO] Loading Encoder on {device}")
-    if args.feature_type == "dino_v2":
+    if feature_type == "dino_v2":
         dino_encoder = DinoV2Encoder(
-            backbone_size=args.dinov2_backbone_size,
+            backbone_size=dinov2_backbone_size,
             device=device
         )
-        clip_encoder = None
         dino_encoder.eval()
-    elif args.feature_type == "clip":
+        clip_encoder = None
+    elif feature_type == "clip":
         clip_encoder = CLIPEncoder(
-            backbone_name=args.clip_backbone_name,
+            backbone_name=clip_backbone_name,
             device=device
         )
         dino_encoder = None
         clip_encoder.eval()
-    elif args.feature_type == "concat":
+    elif feature_type == "concat":
         dino_encoder = DinoV2Encoder(
-            backbone_size=args.dinov2_backbone_size,
+            backbone_size=dinov2_backbone_size,
             device=device
         )
         clip_encoder = CLIPEncoder(
-            backbone_name=args.clip_backbone_name,
+            backbone_name=clip_backbone_name,
             device=device
         )
         dino_encoder.eval()
         clip_encoder.eval()
 
-    # 2) Compute descriptor for query
-    print(f"[INFO] Encoding query image: {args.query}")
-    query_img = load_rgb_image(args.query)
-    query_vec = compute_global_descriptor(dino_encoder, clip_encoder, query_img)
+    if isinstance(query_img_paths, str):
+        query_img_paths = [query_img_paths]
 
-    # 3) Encode all candidates
-    print(f"[INFO] Encoding candidates under: {args.candidates}")
-    cand_vecs  = []       
+    # 2) Encode all candidates
+    cand_vecs = []
     cand_paths = []
+    dir_lists = os.listdir(image_dir)
+    for dir_name in tqdm(dir_lists, total=len(dir_lists), desc="Encoding candidates"):
+        dir_path = os.path.join(image_dir, dir_name)
+        img_files = sorted([f for f in os.listdir(dir_path) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
+        for img_file in img_files:
+            img = load_rgb_image(os.path.join(dir_path, img_file))
+            vec = compute_global_descriptor(dino_encoder, clip_encoder, img)
+            cand_vecs.append(vec)
+            if os.path.exists(os.path.join(asset_dir, f"{dir_name}.glb")):
+                cand_paths.append(os.path.join(asset_dir, f"{dir_name}.glb"))
+            else:
+                cand_paths.append(objaverse_data[dir_name])
+    cand_vecs = np.stack(cand_vecs, axis=0).astype(np.float32)       # 形状 (N, D)
 
-    img_dir = Path(args.candidates)
-    img_files = sorted([f for f in img_dir.iterdir() if f.suffix.lower() in [".png", ".jpg", ".jpeg"]])
-    for img_file in img_files:
-        # print(f"[INFO] Encoding {img_file}")
-        img = load_rgb_image(img_file)
-        vec = compute_global_descriptor(dino_encoder, clip_encoder, img)
-        cand_vecs.append(vec)
-        cand_paths.append(img_file)
-
-    cand_vecs = np.stack(cand_vecs, axis=0)       # 形状 (N, D)
+    # 3) Encode query images
+    query_vecs = []
+    for qpath in query_img_paths:
+        print(f"[INFO] Encoding query image: {qpath}")
+        qimg = load_rgb_image(qpath)
+        qvec = compute_global_descriptor(dino_encoder, clip_encoder, qimg)  # -> (D,)
+        query_vecs.append(qvec)
+    query_vecs = np.stack(query_vecs, axis=0).astype(np.float32)
 
     # 4) Search & rank
-    D = query_vec.shape[0]
+    D = cand_vecs.shape[1]
     index = faiss.IndexFlatL2(D)
     index.add(cand_vecs)
 
-    Dists, Idxs = index.search(query_vec[None, :], len(cand_paths))
-    Dists, Idxs = Dists[0], Idxs[0]
+    V = cand_vecs.shape[0]
+    best_dists = np.full(V, np.inf, dtype=np.float32)
 
-    # 5) print results
-    print("\nRanked candidates (most similar first):")
-    for rank, (idx, dist) in enumerate(zip(Idxs, Dists), start=1):
-        p = cand_paths[idx]
-        print(f"{rank:2d}. {p.parent.name}/{p.name:<25s}  dist = {dist:.4f}")
+    for qi in range(query_vecs.shape[0]):
+        Dists, Idxs = index.search(query_vecs[qi:qi+1], V)  # (1, V)
+        drow, irow = Dists[0], Idxs[0]
+        mask = drow < best_dists[irow]
+        best_dists[irow[mask]] = drow[mask]
 
-    out_path = Path("match_rankings") / f"{args.query.stem}_ranking.txt"
-    out_path.parent.mkdir(exist_ok=True)
-    with out_path.open("w") as f:
-        f.write("Ranked candidates (most similar first):\n")
-        for rank, (idx, dist) in enumerate(zip(Idxs, Dists), start=1):
-            p = cand_paths[idx]
-            f.write(f"{rank:2d}. {p.parent.name}/{p.name:<25s}  dist = {dist:.4f}\n")
-    print(f"\n[INFO] Saved ranking results to: {out_path}")
+    order = np.argsort(best_dists)
+    sorted_cand_paths = [cand_paths[i] for i in order]
+    sorted_best_dists = best_dists[order]
+
+    with open(f"{asset_dir}/ranking.jsonl", "w") as f:
+        for i, cand_path in enumerate(sorted_cand_paths):
+            f.write(json.dumps({
+                "rank": i + 1,
+                "path": cand_path,
+                "distance": float(sorted_best_dists[i])
+            }) + "\n")
+        
+def main():
+    parser = argparse.ArgumentParser(description="Rank cousins based on image similarity.")
+    parser.add_argument("--asset_dir", type=str, required=True, help="Directory containing .glb files.")
+    parser.add_argument("--query_img_paths", type=str, nargs='+', required=True, help="Path(s) to query image(s).")
+    parser.add_argument("--feature_type", type=str, default="concat", choices=["dino_v2", "clip", "concat"], help="Feature type to use for encoding.")
+    parser.add_argument("--dinov2_backbone_size", type=str, default="base", help="DINOv2 backbone size.")
+    parser.add_argument("--clip_backbone_name", type=str, default="ViT-B/16", help="CLIP backbone name.")
+
+    args = parser.parse_args()
+    
+    rank_cousins(
+        asset_dir=args.asset_dir,
+        query_img_paths=args.query_img_paths,
+        feature_type=args.feature_type,
+        dinov2_backbone_size=args.dinov2_backbone_size,
+        clip_backbone_name=args.clip_backbone_name
+    )
 
 if __name__ == "__main__":
     main()
