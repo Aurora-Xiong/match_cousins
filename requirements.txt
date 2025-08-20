@@ -2,3 +2,7 @@ requests
 flask
 tqdm
 objaverse
+mathutils
+bpy
+faiss
+
