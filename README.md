@@ -9,6 +9,7 @@ git clone https://github.com/facebookresearch/dinov2.git && cd dinov2
 conda install conda-build
 conda-develop . && cd ..
 pip install git+https://github.com/openai/CLIP.git
+conda install -c pytorch -c nvidia faiss-gpu=1.8.0
 ```
 ## Usage
 ### sketchfab

@@ -4,5 +4,4 @@ tqdm
 objaverse
 mathutils
 bpy
-faiss
 
