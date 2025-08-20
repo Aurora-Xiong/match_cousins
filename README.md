@@ -16,6 +16,9 @@ pip install git+https://github.com/openai/CLIP.git
 # example
 python sketchfab.py -q cup -n 10 --out cup
 # download_from_sketchfab(query: str, n: int = 10, out_dir: str = "./downloads")
+# Log in using my account. (If you register your own account, you’ll need to complete OAuth 2.0 authentication to obtain a client ID and client secret.)
+# Account: xiongjing2333@gmail.com
+# Password: !1a@2s#3d$4f%5g^6h
 ```
 ### meshyai
 ```bash
