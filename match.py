@@ -114,6 +114,7 @@ def compute_global_descriptor(
     Encode the image into patch features and mean-pool into a D-dim vector.
     """
     desc_list = []
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # ---------- DINOv2 ----------
     if dino_encoder is not None:
@@ -123,21 +124,23 @@ def compute_global_descriptor(
         Hf, Wf, D = dino_feats.shape
         dino_feats = dino_feats.reshape(-1, D)              # → (Hf*Wf, D)
         dino_feats = dino_feats.mean(axis=0)                 # → (D,)
-        desc_list.append(dino_feats)
+        desc_list.append(torch.tensor(dino_feats, device=device))
 
     # ---------- CLIP ----------
     if clip_encoder is not None:
         x = clip_encoder.preprocess(img_np).to(clip_encoder.device)   # (1,C,H,W)
         clip_feats = clip_encoder.forward(x).squeeze(0)               # (D,)
-        clip_feats = clip_feats.detach().cpu().numpy()                # → ndarray
         desc_list.append(clip_feats)
 
     if not desc_list:
         raise ValueError("Both encoders are None.")
 
-    desc = np.concatenate(desc_list, axis=0) if len(desc_list) > 1 else desc_list[0]
+    if len(desc_list) == 1:
+        desc = desc_list[0]
+    else:
+        desc = torch.cat(desc_list, dim=0)   # (D1 + D2,)
 
-    return np.ascontiguousarray(desc, dtype=np.float32)
+    return desc.detach().cpu().numpy().astype(np.float32)
 
 def rank_cousins(
     asset_dir: str,
@@ -203,6 +206,7 @@ def rank_cousins(
     # 2) Encode all candidates
     cand_vecs = []
     cand_paths = []
+    cand_image_paths = []
     dir_lists = os.listdir(image_dir)
     for dir_name in tqdm(dir_lists, total=len(dir_lists), desc="Encoding candidates"):
         dir_path = os.path.join(image_dir, dir_name)
@@ -211,6 +215,7 @@ def rank_cousins(
             img = load_rgb_image(os.path.join(dir_path, img_file))
             vec = compute_global_descriptor(dino_encoder, clip_encoder, img)
             cand_vecs.append(vec)
+            cand_image_paths.append(os.path.join(dir_path, img_file))
             if os.path.exists(os.path.join(asset_dir, f"{dir_name}.glb")):
                 cand_paths.append(os.path.join(asset_dir, f"{dir_name}.glb"))
             else:
@@ -242,13 +247,15 @@ def rank_cousins(
 
     order = np.argsort(best_dists)
     sorted_cand_paths = [cand_paths[i] for i in order]
+    sorted_cand_image_paths = [cand_image_paths[i] for i in order]
     sorted_best_dists = best_dists[order]
 
     with open(f"{asset_dir}/ranking.jsonl", "w") as f:
-        for i, cand_path in enumerate(sorted_cand_paths):
+        for i, (cand_path, cand_image_path) in enumerate(zip(sorted_cand_paths, sorted_cand_image_paths)):
             f.write(json.dumps({
                 "rank": i + 1,
-                "path": cand_path,
+                "glb_path": cand_path,
+                "image_path": cand_image_path,
                 "distance": float(sorted_best_dists[i])
             }) + "\n")
         

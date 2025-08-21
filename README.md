@@ -1,7 +1,7 @@
 # Match Cousins
 ## Environment
 ```bash
-conda create -n matching python=3.11 -y
+conda create -n matching python=3.10 -y
 conda activate matching
 pip install -r requirements.txt
 mkdir -p deps && cd deps
@@ -10,6 +10,7 @@ conda install conda-build
 conda-develop . && cd ..
 pip install git+https://github.com/openai/CLIP.git
 conda install -c pytorch -c nvidia faiss-gpu=1.8.0
+cd ..
 ```
 ## Usage
 ### sketchfab
@@ -17,9 +18,6 @@ conda install -c pytorch -c nvidia faiss-gpu=1.8.0
 # example
 python sketchfab.py -q cup -n 10 --out cup
 # download_from_sketchfab(query: str, n: int = 10, out_dir: str = "./downloads")
-# Log in using my account. (If you register your own account, you’ll need to complete OAuth 2.0 authentication to obtain a client ID and client secret.)
-# Account: xiongjing2333@gmail.com
-# Password: !1a@2s#3d$4f%5g^6h
 ```
 ### meshyai
 ```bash
