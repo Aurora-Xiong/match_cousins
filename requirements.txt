@@ -4,4 +4,5 @@ tqdm
 objaverse
 mathutils
 bpy
-
+beautifulsoup4
+selenium
