@@ -4,12 +4,14 @@
 conda create -n matching python=3.10 -y
 conda activate matching
 pip install -r requirements.txt
+pip install bpy==3.6.0 --extra-index-url https://download.blender.org/pypi/
 mkdir -p deps && cd deps
 git clone https://github.com/facebookresearch/dinov2.git && cd dinov2
 conda install conda-build
 conda-develop . && cd ..
 pip install git+https://github.com/openai/CLIP.git
 conda install -c pytorch -c nvidia faiss-gpu=1.8.0
+# conda install pytorch::faiss-cpu
 cd ..
 ```
 ## Usage
@@ -22,8 +24,14 @@ python sketchfab.py -q cup -n 10 --out cup
 ### meshyai
 ```bash
 # example
-python meshyai.py -q cup -n 5 --out cup
-# download_from_meshai(keyword: str, output_dir: str, max_count: int)
+python meshyai.py -t "spatula" -o "spatula" -n 5
+python meshyai.py -i "spatula.png" -o "spatula" -n 5
+# def generate_3d_model(
+#     max_count: int,
+#     output_dir: Path | str | None = "./meshyai_models",
+#     text_prompt: Optional[str] = None,
+#     image_prompt: Optional[List[Path] | List[str] | Path | str] = None,
+# ) -> None:
 ```
 ### objaverse
 ```bash
