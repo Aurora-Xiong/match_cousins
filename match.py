@@ -25,20 +25,19 @@ def render_blender(glb_path, out_dir, size=512):
 
     # Load .glb model
     bpy.ops.import_scene.gltf(filepath=glb_path)
-    bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.ops.object.select_all(action='SELECT')
-    obj = bpy.context.active_object
-    bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
-    obj.location = (0.0, 0.0, 0.0)
+    # bpy.ops.object.mode_set(mode='OBJECT')
+    # bpy.ops.object.select_all(action='SELECT')
+    # obj = bpy.context.active_object
+    # bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
+    # obj.location = (0.0, 0.0, 0.0)
 
     # Compute camera distance
-    meshes = [o for o in bpy.context.selected_objects if o.type == 'MESH']
+    meshes = [o for o in bpy.context.scene.objects if o.type == 'MESH']
     corners = [m.matrix_world @ Vector(c) for m in meshes for c in m.bound_box]
     bbox_min = Vector((min(v.x for v in corners), min(v.y for v in corners), min(v.z for v in corners)))
     bbox_max = Vector((max(v.x for v in corners), max(v.y for v in corners), max(v.z for v in corners)))
     center = (bbox_min + bbox_max) * 0.5
     extent = (bbox_max - bbox_min).length
-    radius = extent * 1.2
 
     # Add camera
     cam_data = bpy.data.cameras.new("Camera")
@@ -46,39 +45,43 @@ def render_blender(glb_path, out_dir, size=512):
     bpy.context.collection.objects.link(cam)
     bpy.context.scene.camera = cam
     cam.data.lens_unit = 'FOV'
-    cam.data.angle = math.radians(45)
+    cam.data.angle = math.radians(90)
+    cam.data.clip_start = 0.01
+    cam.data.clip_end = 1000.0
 
     # Render settings
     scene = bpy.context.scene
     scene.render.engine = 'CYCLES'
     scene.render.image_settings.file_format = 'PNG'
-    scene.render.image_settings.color_mode = 'RGB'
+    scene.render.image_settings.color_mode = 'RGBA'
+    scene.render.film_transparent = True
     scene.render.resolution_x = size
     scene.render.resolution_y = size
+
     scene.cycles.device = 'GPU' if bpy.context.preferences.addons['cycles'].preferences.compute_device_type != 'NONE' else 'CPU'
 
     # White background
-    scene.world = bpy.data.worlds.new("World")
-    scene.world.use_nodes = True
-    scene.world.light_settings.ao_factor = 0.6
-    bg = scene.world.node_tree.nodes["Background"]
-    bg.inputs[0].default_value = (0.92, 0.92, 0.92, 1)
-    bg.inputs[1].default_value = 1.0
+    # scene.world = bpy.data.worlds.new("World")
+    # scene.world.use_nodes = True
+    # scene.world.light_settings.ao_factor = 0.6
+    # bg = scene.world.node_tree.nodes["Background"]
+    # bg.inputs[0].default_value = (0.92, 0.92, 0.92, 1)
+    # bg.inputs[1].default_value = 1.0
 
     # Add 3 bright directional lights
-    light_dirs = [(1, 1, 1), (-1, 1, 1), (0, -1, 1)]
+    light_dirs = [
+        (1, 0, 0), (-1, 0, 0),
+        (0, 1, 0), (0, -1, 0),
+        (0, 0, 1), (0, 0, -1),
+    ]
     for i, dir_vec in enumerate(light_dirs):
         light_data = bpy.data.lights.new(name=f'Light{i}', type='SUN')
         light_data.energy = 1.0
         light = bpy.data.objects.new(f'Light{i}', light_data)
         bpy.context.collection.objects.link(light)
-        light.rotation_mode = 'QUATERNION'
-        light.location = (0, 0, 0)
-        light.rotation_euler = (
-            math.atan2(dir_vec[1], dir_vec[2]),
-            -math.atan2(dir_vec[0], dir_vec[2]),
-            0
-        )
+        v = Vector(dir_vec).normalized()
+        light.rotation_euler = v.to_track_quat('-Z', 'Y').to_euler()
+
 
     # Define six view directions
     views = {
@@ -96,7 +99,7 @@ def render_blender(glb_path, out_dir, size=512):
 
     # Render each view
     for name, direction in views.items():
-        cam.location = center + direction * radius
+        cam.location = center + direction * extent
         look_at(cam, center)
         scene.render.filepath = os.path.join(out_dir, f"{name}.png")
         bpy.ops.render.render(write_still=True)
@@ -152,19 +155,26 @@ def rank_cousins(
     assert feature_type in ["dino_v2", "clip", "concat"], f"Invalid feature type: {feature_type}"
 
     # 1.render images of cousins
-    files = os.listdir(asset_dir)
+    files = []
+    for item in os.listdir(asset_dir):
+        if os.path.isdir(os.path.join(asset_dir, item)):
+            files.extend([os.path.join(item, file) for file in os.listdir(os.path.join(asset_dir, item)) if file.endswith(".glb")])
+        elif item.endswith(".glb"):
+            files.append(item)
     image_dir = f"{asset_dir}_images"
     os.makedirs(image_dir, exist_ok=True)
     for file in tqdm(files, total=len(files), desc="Rendering candidates"):
         if file.endswith(".glb"):
             glb_path = os.path.join(asset_dir, file)
-            render_blender(glb_path, f"{image_dir}/{file.replace('.glb', '')}", size=512)
+            print("Rendering:", glb_path)
+            render_blender(glb_path, f"{image_dir}/{os.path.basename(file).replace('.glb', '')}", size=512)
 
     objaverse_data = {}
-    with open(f"{asset_dir}/objaverse_download.jsonl", "r") as f:
-        for line in f:
-            data = json.loads(line)
-            objaverse_data[data["uid"]] = data["path"]
+    if os.path.exists(f"{asset_dir}/objaverse_download.jsonl"):
+        with open(f"{asset_dir}/objaverse_download.jsonl", "r") as f:
+            for line in f:
+                data = json.loads(line)
+                objaverse_data[data["uid"]] = data["path"]
     
     for uid in objaverse_data.keys():
         glb_path = objaverse_data[uid]
@@ -216,8 +226,10 @@ def rank_cousins(
             vec = compute_global_descriptor(dino_encoder, clip_encoder, img)
             cand_vecs.append(vec)
             cand_image_paths.append(os.path.join(dir_path, img_file))
-            if os.path.exists(os.path.join(asset_dir, f"{dir_name}.glb")):
-                cand_paths.append(os.path.join(asset_dir, f"{dir_name}.glb"))
+            print(os.path.join(asset_dir, f"{dir_name}/{dir_name}.glb"))
+            if os.path.exists(os.path.join(asset_dir, f"{dir_name}/{dir_name}.glb")):
+                cand_paths.append(os.path.join(asset_dir, f"{dir_name}/{dir_name}.glb"))
+                print("saving glb path:", os.path.join(asset_dir, f"{dir_name}/{dir_name}.glb"))
             else:
                 cand_paths.append(objaverse_data[dir_name])
     cand_vecs = np.stack(cand_vecs, axis=0).astype(np.float32)       # 形状 (N, D)
@@ -261,7 +273,7 @@ def rank_cousins(
         
 def main():
     parser = argparse.ArgumentParser(description="Rank cousins based on image similarity.")
-    parser.add_argument("--asset_dir", type=str, required=True, help="Directory containing .glb files.")
+    parser.add_argument("--asset_dir", type=str, required=True, help="Directory containing asset folders.")
     parser.add_argument("--query_img_paths", type=str, nargs='+', required=True, help="Path(s) to query image(s).")
     parser.add_argument("--feature_type", type=str, default="concat", choices=["dino_v2", "clip", "concat"], help="Feature type to use for encoding.")
     parser.add_argument("--dinov2_backbone_size", type=str, default="base", help="DINOv2 backbone size.")

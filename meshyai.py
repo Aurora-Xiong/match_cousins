@@ -8,7 +8,7 @@ import base64
 import tqdm
 
 # MESHYAI_API = os.environ.get("MESHYAI_API")
-MESHYAI_API = "msy_6Y8nCVSACVEDwuQlsikIG71WzP3TRkeNDCxY"
+MESHYAI_API = "msy_eN1PP1cAQApOPDN4dmVJYxnfpc0EiyHEwyss"
 
 def generate_3d_model(
     max_count: int,
@@ -34,7 +34,7 @@ def generate_3d_model(
 
     if text_prompt:
 
-      generate_preview_request = {
+      preview_request = {
         "mode": "preview",
         "prompt": f"one {text_prompt}",
         "negative_prompt": "low quality, low resolution, low poly, ugly",
@@ -43,18 +43,15 @@ def generate_3d_model(
       }
 
       for i in tqdm.tqdm(range(max_count)):
-
-        # 1. Generate a preview model and get the task ID
-        generate_preview_response = requests.post(
+        preview_response = requests.post(
           "https://api.meshy.ai/openapi/v2/text-to-3d",
           headers=headers,
-          json=generate_preview_request,
+          json=preview_request,
         )
-        generate_preview_response.raise_for_status()
-        preview_task_id = generate_preview_response.json()["result"]
+        preview_response.raise_for_status()
+        preview_task_id = preview_response.json()["result"]
         # print("Preview task created. Task ID:", preview_task_id)
 
-        # 2. Poll the preview task status until it's finished
         preview_task = None
         while True:
           preview_task_response = requests.get(
@@ -69,58 +66,72 @@ def generate_3d_model(
           # print("Preview task status:", preview_task["status"], "| Progress:", preview_task["progress"], "| Retrying in 5 seconds...")
           time.sleep(5)
 
-        # 3. Download the preview model in glb format
-        preview_model_url = preview_task["model_urls"]["glb"]
-        preview_model_response = requests.get(preview_model_url)
-        preview_model_response.raise_for_status()
+        # preview_model_url = preview_task["model_urls"]["glb"]
+        # preview_model_response = requests.get(preview_model_url)
+        # preview_model_response.raise_for_status()
 
-        # with open(f"{output_dir}/meshyai_preview_model_{i}.glb", "wb") as f:
-        #   f.write(preview_model_response.content)
-
-        # 4. Generate a refined model and get the task ID
-        generate_refined_request = {
+        refine_request = {
           "mode": "refine",
           "preview_task_id": preview_task_id,
+          "texture_prompt": f"A highly detailed and realistic texture for a {text_prompt}",
         }
-        generate_refined_response = requests.post(
+        refine_response = requests.post(
           "https://api.meshy.ai/openapi/v2/text-to-3d",
           headers=headers,
-          json=generate_refined_request,
+          json=refine_request,
         )
-        generate_refined_response.raise_for_status()
-        refined_task_id = generate_refined_response.json()["result"]
+        refine_response.raise_for_status()
+        refine_task_id = refine_response.json()["result"]
         # print("Refined task created. Task ID:", refined_task_id)
 
-        # 5. Poll the refined task status until it's finished
-        refined_task = None
+        refine_task = None
         while True:
-          refined_task_response = requests.get(
-            f"https://api.meshy.ai/openapi/v2/text-to-3d/{refined_task_id}",
+          refine_task_response = requests.get(
+            f"https://api.meshy.ai/openapi/v2/text-to-3d/{refine_task_id}",
             headers=headers,
           )
-          refined_task_response.raise_for_status()
-          refined_task = refined_task_response.json()
-          if refined_task["status"] == "SUCCEEDED":
+          refine_task_response.raise_for_status()
+          refine_task = refine_task_response.json()
+          if refine_task["status"] == "SUCCEEDED":
             # print("Refined task finished.")
             break
           # print("Refined task status:", refined_task["status"], "| Progress:", refined_task["progress"], "| Retrying in 5 seconds...")
           time.sleep(5)
 
-        # 6. Download the refined model in glb format
-        refined_model_url = refined_task["model_urls"]["glb"]
+        # texture_url = list(refine_task["texture_urls"][0].values())[0]
+        # texture_file = requests.get(texture_url)
+        # texture_file.raise_for_status()
+        mesh_dir = output_dir / f"{text_prompt}_{idx}"
+        while mesh_dir.exists():
+          idx += 1
+          mesh_dir = output_dir / f"{text_prompt}_{idx}"
+        mesh_dir.mkdir(parents=True, exist_ok=True)
+        # with open(mesh_dir / f"{text_prompt}_{idx}.png", "wb") as f:
+        #   f.write(texture_file.content)
+        # mtl_response = requests.get(refine_task["model_urls"]["mtl"])
+        # mtl_response.raise_for_status()
+        # with open(mesh_dir / f"{text_prompt}_{idx}.mtl", "wb") as f:
+        #   f.write(mtl_response.content)
+
+        # refined_model_url = refine_task["model_urls"]["glb"]
+        # refined_model_response = requests.get(refined_model_url)
+        # refined_model_response.raise_for_status()
+        # with open(mesh_dir / f"refined_{text_prompt}_{idx}.glb", "wb") as f:
+        #   f.write(refined_model_response.content)
+
         remesh_request = {
-          "model_url": refined_model_url,
-          "target_formats": ["glb"],
+          "input_task_id": refine_task_id,
+          "target_formats": ["glb", "obj"],
           "resize_height": 0.01,
           "origin_at": "bottom"
         } 
-        generate_remesh_response = requests.post(
+        remesh_response = requests.post(
             "https://api.meshy.ai/openapi/v1/remesh",
             headers=headers,
             json=remesh_request
         )
-        generate_remesh_response.raise_for_status()
-        remesh_task_id = generate_remesh_response.json()['result']
+        remesh_response.raise_for_status()
+        remesh_task_id = remesh_response.json()['result']
         # print("remesh task created. Task ID:", remesh_task_id)
 
         remesh_task = None
@@ -137,19 +148,17 @@ def generate_3d_model(
             break
           time.sleep(5)
 
-        remeshed_model_response = requests.get(remesh_task["model_urls"]["glb"])
-        remeshed_model_response.raise_for_status()
-
-        output_path = output_dir / f"{text_prompt}_{idx}.glb"
-        while output_path.exists():
-          idx += 1
-          output_path = output_dir / f"{text_prompt}_{idx}.glb"
-        with open(output_path, "wb") as f:
-          f.write(remeshed_model_response.content)
+        remeshed_glb_response = requests.get(remesh_task["model_urls"]["glb"])
+        remeshed_glb_response.raise_for_status()
+        with open(mesh_dir / f"{text_prompt}_{idx}.glb", "wb") as f:
+          f.write(remeshed_glb_response.content)
+        # remeshed_obj_response = requests.get(remesh_task["model_urls"]["obj"])
+        # remeshed_obj_response.raise_for_status()
+        # with open(mesh_dir / f"{text_prompt}_{idx}.obj", "wb") as f:
+        #   f.write(remeshed_obj_response.content)
         idx += 1
 
     else:
-       
         image_data = []
         image_exts = []
         if isinstance(image_prompt, (str, Path)):
@@ -176,43 +185,57 @@ def generate_3d_model(
         }
 
         for i in tqdm.tqdm(range(max_count)):
-          response = requests.post(
+          generate_response = requests.post(
               "https://api.meshy.ai/openapi/v1/multi-image-to-3d",
               headers=headers,
               json=payload,
           )
-          response.raise_for_status()
-          task_id = response.json()["result"]
+          generate_response.raise_for_status()
+          generate_task_id = generate_response.json()["result"]
           # print("3D reconstruction task created. Task ID:", task_id)
 
-          task_status = None
+          generate_task_status = None
           while True:
-            task_response = requests.get(
-              f"https://api.meshy.ai/openapi/v1/multi-image-to-3d/{task_id}",
+            generate_task_response = requests.get(
+              f"https://api.meshy.ai/openapi/v1/multi-image-to-3d/{generate_task_id}",
               headers=headers,
             )
-            task_response.raise_for_status()
-            task_status = task_response.json()
-            if task_status["status"] == "SUCCEEDED":
+            generate_task_response.raise_for_status()
+            generate_task_status = generate_task_response.json()
+            if generate_task_status["status"] == "SUCCEEDED":
               # print("Task finished.")
               break
             # print("Task status:", task_status["status"], "| Progress:", task_status["progress"], "| Retrying in 5 seconds...")
             time.sleep(5)
           
-          model_url = task_status["model_urls"]["glb"]
+          # texture_url = list(generate_task_status["texture_urls"][0].values())[0]
+          # texture_file = requests.get(texture_url)
+          # texture_file.raise_for_status()
+          mesh_dir = output_dir / f"reconstruction_{idx}"
+          while mesh_dir.exists():
+            idx += 1
+            mesh_dir = output_dir / f"reconstruction_{idx}"
+          mesh_dir.mkdir(parents=True, exist_ok=True)
+          # with open(mesh_dir / f"reconstruction_{idx}.png", "wb") as f:
+          #   f.write(texture_file.content)
+          # mtl_response = requests.get(generate_task_status["model_urls"]["mtl"])
+          # mtl_response.raise_for_status()
+          # with open(mesh_dir / f"reconstruction_{idx}.mtl", "wb") as f:
+          #   f.write(mtl_response.content)
+
           remesh_request = {
-            "model_url": model_url,
-            "target_formats": ["glb"],
+            "input_task_id": generate_task_id,
+            "target_formats": ["glb", "obj"],
             "resize_height": 0.01,
             "origin_at": "bottom"
           } 
-          generate_remesh_response = requests.post(
+          remesh_response = requests.post(
               "https://api.meshy.ai/openapi/v1/remesh",
               headers=headers,
               json=remesh_request
           )
-          generate_remesh_response.raise_for_status()
-          remesh_task_id = generate_remesh_response.json()['result']
+          remesh_response.raise_for_status()
+          remesh_task_id = remesh_response.json()['result']
           # print("Remesh task created. Task ID:", remesh_task_id)
           remesh_task = None
           while True:
@@ -228,14 +251,14 @@ def generate_3d_model(
               break
             time.sleep(5)
 
-          model_response = requests.get(remesh_task["model_urls"]["glb"])
-          model_response.raise_for_status()
-          output_path = output_dir / f"reconstruction_{i}.glb"
-          while output_path.exists():
-            idx += 1
-            output_path = output_dir / f"reconstruction_{idx}.glb"
-          with open(output_path, "wb") as f:
-            f.write(model_response.content)
+          remeshed_glb_response = requests.get(remesh_task["model_urls"]["glb"])
+          remeshed_glb_response.raise_for_status()
+          with open(mesh_dir / f"reconstruction_{idx}.glb", "wb") as f:
+            f.write(remeshed_glb_response.content)
+          # remeshed_obj_response = requests.get(remesh_task["model_urls"]["obj"])
+          # remeshed_obj_response.raise_for_status()
+          # with open(mesh_dir / f"reconstruction_{idx}.obj", "wb") as f:
+          #   f.write(remeshed_obj_response.content) 
           idx += 1
 
 if __name__ == "__main__":

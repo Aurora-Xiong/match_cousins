@@ -36,14 +36,14 @@ python meshyai.py -i "spatula.png" -o "spatula" -n 5
 ### objaverse
 ```bash
 # example
-python download_objaverse.py -q cup --out cup -n 100
+python download_objaverse.py -q spatula --out spatula -n 100
 # download_from_objaverse(keyword: str, output_dir: str, max_count: int)
 ```
 
 ### ranking
 ```bash
 # example
-python match.py --asset_dir cup --query_img_paths cup.jpeg --feature_type concat
+python match.py --asset_dir spatula --query_img_paths spatula.png --feature_type concat
 # def rank_cousins(
 #     asset_dir: str,
 #     query_img_paths: str | list[str],
