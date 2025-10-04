@@ -17,7 +17,7 @@ cd ..
 ## Usage
 ### sketchfab
 ```bash
-# example
+# aborted
 python sketchfab.py -q cup -n 10 --out cup
 # download_from_sketchfab(query: str, n: int = 10, out_dir: str = "./downloads")
 ```
